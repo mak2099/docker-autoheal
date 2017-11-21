@@ -9,4 +9,4 @@ ENTRYPOINT ["/docker-entrypoint"]
 
 HEALTHCHECK --interval=5s CMD exit 0
 
-CMD ["autoheal","autostart"]
+CMD ["autoheal"]
