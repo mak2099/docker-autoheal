@@ -1,8 +1,10 @@
 #!/usr/bin/env sh
-set -e
 
 DOCKER_SOCK=/tmp/docker.sock
 TMP_DIR=/tmp/restart
+E_CONTAINERS=($CONTAINER_LIST)
+R_CONTAINERS=($(curl --no-buffer -s -XGET --unix-socket $DOCKER_SOCK  http://localhost/containers/json |jq -r '.[].Names'  |jq -r .[] | cut -d '/' -f2))
+A_CONTAINERS=($(curl --no-buffer -s -XGET --unix-socket $DOCKER_SOCK  http://localhost/containers/json?all=true |jq -r '.[].Names'  |jq -r .[] | cut -d '/' -f2))
 
 if [ "$1" = 'autoheal' ] && [ -e ${DOCKER_SOCK} ]; then
   if [ -d $TMP_DIR ]; then
@@ -23,7 +25,7 @@ if [ "$1" = 'autoheal' ] && [ -e ${DOCKER_SOCK} ]; then
 
   echo "Monitoring containers for unhealthy status"
   while true; do
-    sleep ${AUTOHEAL_INTERVAL:=5}
+    sleep ${AUTOHEAL_INTERVAL:=300}
 
     CONTAINERS=$(curl --no-buffer -s -XGET --unix-socket ${DOCKER_SOCK} http://localhost/containers/json | selector)
     for CONTAINER in $CONTAINERS; do
@@ -32,39 +34,32 @@ if [ "$1" = 'autoheal' ] && [ -e ${DOCKER_SOCK} ]; then
         DATE=$(date +%d-%m-%Y" "%H:%M:%S)
         echo "$DATE Container ${CONTAINER:0:12} found to be unhealthy"
         touch "$TMP_DIR/$CONTAINER"
+      
+    	  for CONTAINER in `ls $TMP_DIR`; do 
+          DATE=$(date +%d-%m-%Y" "%H:%M:%S)
+          echo "$DATE Restarting container ${CONTAINER:0:12}"
+          curl -f --no-buffer -s -XPOST --unix-socket ${DOCKER_SOCK} http://localhost/containers/${CONTAINER}/restart && rm "$TMP_DIR/$CONTAINER" || echo "$DATE Restarting container ${CONTAINER:0:12} failed"
+          done
       fi
     done
-    for CONTAINER in `ls $TMP_DIR`; do 
-        DATE=$(date +%d-%m-%Y" "%H:%M:%S)
-        echo "$DATE Restarting container ${CONTAINER:0:12}"
-        curl -f --no-buffer -s -XPOST --unix-socket ${DOCKER_SOCK} http://localhost/containers/${CONTAINER}/restart && rm "$TMP_DIR/$CONTAINER" || echo "$DATE Restarting container ${CONTAINER:0:12} failed"
-    done
-  done
+
+       echo "Monitoring for stopped containers"
+	for e_container in ${E_CONTAINERS[@]}; do
+  		if [[ $(echo ${A_CONTAINERS[@]} |grep -Ew "${e_container}" | wc -l) -eq 1 ]]; then
+    		#echo "container $e_container is in running list for ${A_CONTAINERS[@]}"
+    		# get status
+      		status=$(curl --no-buffer -s -XGET --unix-socket $DOCKER_SOCK  http://localhost/containers/$e_container/json |jq -r '.State.Status')
+      		#echo "$e_container status is $status"
+        		if [ ! ${status} == "running" ]; then
+        		# attempt to start the container
+          		echo "starting container $e_container"
+          		curl -f --no-buffer -s -XPOST --unix-socket $DOCKER_SOCK http://localhost/containers/${e_container}/start || echo "$(DATE) starting container ${e-container} failed"
+                        sleep 15
+        		fi
+    		fi
+	done
+     done
 
 else
-  exec "$@"
+exec "$@"
 fi
-
-E_CONTAINERS=($CONTAINER_LIST)
-R_CONTAINERS=($(curl --no-buffer -s -XGET --unix-socket $DOCKER_SOCK  http://localhost/containers/json |jq -r '.[].Names'  |jq -r .[] | cut -d '/' -f2))
-A_CONTAINERS=($(curl --no-buffer -s -XGET --unix-socket $DOCKER_SOCK  http://localhost/containers/json?all=true |jq -r '.[].Names'  |jq -r .[] | cut -d '/' -f2))
-
-echo "Monitoring for stopped containers"
-while true; do
-  sleep ${CHECK_INTERFAL:=300}
-
-for e_container in ${E_CONTAINERS[@]}; do
-  if [[ $(echo ${A_CONTAINERS[@]} |grep -Ew "${e_container}" | wc -l) -eq 1 ]]; then
-    #echo "container $e_container is in running list for ${A_CONTAINERS[@]}"
-    # get status
-      status=$(curl --no-buffer -s -XGET --unix-socket $DOCKER_SOCK  http://localhost/containers/$e_container/json |jq -r '.State.Status')
-      #echo "$e_container status is $status"
-
-        if [ ! ${status} == "running" ]; then
-        # attempt to start the container
-          echo "starting container $e_container"
-          curl -f --no-buffer -s -XPOST --unix-socket $DOCKER_SOCK http://localhost/containers/${e_container}/start || echo "$(DATE) starting container ${e-container} failed"
-        fi
-  fi
-done
-done   
