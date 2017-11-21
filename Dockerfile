@@ -1,6 +1,8 @@
-FROM alpine:3.5
+FROM centos
 
-RUN apk add --no-cache curl jq
+RUN yum install wget -y
+RUN wget -O /usr/bin/jq https://github.com/stedolan/jq/releases/download/jq-1.5/jq-linux64
+RUN chmod +x /usr/bin/jq
 
 COPY docker-entrypoint /
 ENTRYPOINT ["/docker-entrypoint"]
